@@ -1,0 +1,309 @@
+1. Visão Geral do Projeto
+
+O DeFAI, também referido internamente como AFI, constitui uma plataforma de negociação algorítmica integralmente automatizada, concebida para operar no ecossistema de cripto-ativos com elevada robustez e flexibilidade. À semelhança de um sistema ciber-físico, combina múltiplos domínios de conhecimento – engenharia de software, análise quantitativa, ciência de dados e gestão de risco – numa solução unificada capaz de analisar mercados em tempo-real, tomar decisões de investimento e executar ordens de forma autónoma. Toda a orquestração das funções nucleares é realizada por um conjunto de componentes independentes que comunicam entre si através de interfaces claramente definidas, garantindo extensibilidade e manutenção facilitada.
+
+Do ponto de vista funcional, a plataforma encontra-se segmentada em módulos especializados. O núcleo de Análise de Mercado é responsável pela aquisição de dados através da biblioteca CCXT, aplicando indicadores técnicos avançados (RSI, MACD, Bandas de Bollinger, ATR, entre outros) e classificando o contexto em regimes Bullish, Bearish, Ranging ou Volatile. Estes regimes são transmitidos ao Orchestrator, que decide qual estratégia dedicar a cada situação. As estratégias – Bull, Bear, Ranging e Volatile – herdam de uma classe base comum que lhes fornece métricas partilhadas e garante coerência no cálculo de sinais. Uma vez gerado um sinal, o módulo de Execução executa a ordem na exchange alvo, respeitando regras de dimensionamento de posição, stop-loss e take-profit impostas pelo Gestor de Risco.
+
+A interação com o utilizador dá-se predominantemente através de duas superfícies: a API REST/WebSocket, construída em FastAPI, que expõe endpoints para consulta de estado, desempenho e risco, e o conector para Botpress, permitindo que um chatbot supervisione e controle a operação por meio de comandos naturais como "/status" ou "/performance". Esta dupla interface torna o sistema simultaneamente programável e amigável a operadores sem background técnico profundo.
+
+O principal objetivo da plataforma é automatizar todo o ciclo de decisão de trading com base em indicadores técnicos, regimes de mercado e regras de gestão de risco parametrizáveis, reduzindo a intervenção manual ao mínimo imprescindível. Ao disponibilizar tanto um modo de paper trading em testnet quanto a possibilidade de operar na mainnet com fundos reais, o sistema acomoda desde estratégias de validação académica até operações financeiras profissionais. Instituições podem integrar o DeFAI nos seus pipelines existentes, enquanto investidores individuais encontram na solução uma ferramenta de automação acessível, acompanhada por documentação exaustiva.
+
+Entre as características de maior relevância destacam-se a modularidade da arquitetura – que permite introduzir novos indicadores e estratégias com esforço marginal –, a elevada cobertura de logs que favorece auditoria e depuração, bem como a ênfase em segurança operacional através da restrição de permissões API e isolamento de ambientes. A configuração centralizada em YAML fornece um ponto único de parametrização, simplificando a adoção em infraestruturas heterogéneas. Por fim, a compatibilidade nativa com o ecossistema Binance, aliada à abstração de exchange via CCXT, garante portabilidade para outras plataformas de negociação num horizonte de evolução do produto.
+
+
+2. Arquitetura do Sistema
+
+A arquitetura do DeFAI foi desenhada para maximizar modularidade, segurança e capacidade de evolução. Cada componente cumpre responsabilidades bem delimitadas e comunica por meio de interfaces explícitas, o que facilita tanto a manutenção como a introdução de novas funcionalidades.
+
+2.1 Configuração Central (`config.yaml`)
+O ficheiro `config.yaml` é o ponto único de parametrização do sistema. Divide-se em várias secções principais:
+
+• `paper_trade`  – activa ou desactiva o modo de simulação, permitindo validar estratégias sem risco financeiro.
+• `exchange`     – contém credenciais, definição de testnet/mainnet, política de fallback e parâmetros de conectividade (retries, timeouts, proxies).
+• `market_analysis` – controla a frequência de actualização (`update_interval`) e define quais indicadores técnicos serão calculados (RSI, MACD, Bollinger, ATR etc.).
+• `execution`    – estabelece limites de posições simultâneas, percentagem de risco por operação, aplicação de stop-loss e take-profit, além do multiplicador de ATR usado em ordens OCO.
+• `strategies`   – agrega sub-chaves onde cada estratégia recebe os seus parâmetros específicos (p. ex. `rsi_threshold`, `trend_threshold`, `volume_threshold`).
+• `logging`      – define nível de verbosidade, formato e se decisões e transacções devem ser persistidas em ficheiro.
+
+Este ficheiro é lido logo no arranque pelo módulo `core.exchange_config`, que expõe métodos utilitários seguros para qualquer componente obter as configurações de que necessita, evitando acessos directos não controlados.
+
+**Trecho real de `config.yaml` demonstrando parâmetros críticos:**
+```yaml
+trading:
+  cycle_interval: 300          # segundos entre ciclos
+  base_currency: "USDT"
+  trading_pairs:
+    - "BTC/USDT"
+    - "ETH/USDT"
+  paper_trading: true          # ✅ garante ambiente seguro de simulação
+exchange:
+  name: 'binance'
+  testnet: true                # conecta-se somente ao testnet
+  mainnet_fallback: false      # impede fallback automático
+```
+Assim, qualquer componente pode confiar nesses valores centrais, mantendo consistência em todo o sistema.
+
+2.2 Fluxo de Análise de Mercado
+O módulo `core.market_analyzer` implementa as classes `MarketRegimeAnalyzer` e `MarketAnalysisSystem`. O fluxo principal ocorre assim:
+
+1. A cada `update_interval`, são recolhidos dados OHLCV através do CCXT.
+2. São calculados os indicadores técnicos configurados.
+3. Cada instrumento recebe uma pontuação ponderada que culmina na classificação do regime actual.
+4. Os resultados são expostos ao Orchestrator e ao RiskManager.
+
+**Excerto de `core/market_analyzer.py` (método `calculate_indicators`) destacando o cálculo de métricas:**
+```python
+def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    df['sma_20'] = ta.trend.sma_indicator(df['close'], 20)
+    df['sma_50'] = ta.trend.sma_indicator(df['close'], 50)
+    df['rsi'] = ta.momentum.rsi(df['close'], 14)
+    df['atr'] = ta.volatility.average_true_range(df['high'], df['low'], df['close'], 14)
+    df['macd'] = ta.trend.macd_diff(df['close'])
+    df['volatility'] = df['close'].pct_change().rolling(20).std()
+    return df
+```
+Essas colunas servem de entrada para o método `detect_regime`, que pondera cada condição e devolve um dicionário com o `regime` e um nível de `confidence`.
+
+O design favorece paralelização: cada símbolo pode ser processado em asyncio tasks independentes, garantindo escalabilidade quando o número de pares aumenta.
+
+2.3 Execução de Ordens e Gestão de Risco
+`execution/order_executor.py` contém a classe `SmartOrderExecutor`, responsável por:
+
+• Dimensionar a posição de acordo com o risco máximo por trade.
+• Enviar ordens limite, mercado ou OCO consoante a estratégia.
+• Repetir envios em caso de falhas transitórias, seguindo uma política de back-off.
+
+**Trecho de `execution/order_executor.py` evidenciando criação da ordem com lógica de _retry_ e _slippage_ dinâmico:**
+```python
+for attempt in range(self._max_retries):
+    try:
+        volatility = self.risk_manager._check_volatility(token)
+        slippage = max(self._base_slippage, volatility * 0.5)
+        order = self.exchange.create_order(
+            symbol=token,
+            type=order_type,
+            side=side,
+            amount=float(amount.quantize(Decimal('1e-8'))),
+            params={
+                'slippage': slippage,
+                **self.strategy_params.get(kwargs.get('strategy', 'default'), {}),
+                **kwargs
+            }
+        )
+        return order
+    except ccxt.NetworkError as e:
+        logger.warning(f"Network error (attempt {attempt+1}): {e}")
+        time.sleep(1)
+```
+Desta forma, a execução adapta automaticamente o _slippage_ às condições de volatilidade e tenta novas submissões em caso de erros de rede.
+• Actualizar o estado local das ordens e calcular métricas de performance.
+
+O RiskManager (parte de `core.market_analyzer`) supervisiona drawdown, exposição agregada e volatilidade, podendo reduzir o tamanho de posição global ou suspender novas entradas quando necessário.
+
+2.4 Integração com Exchanges
+A abstracção de acesso a exchanges é feita através da biblioteca CCXT, enquanto `core.exchange_config.py` garante:
+
+• Separação total entre chaves de testnet e mainnet.
+• Capacidade de fallback automático para mainnet se a testnet estiver indisponível (opcional).
+• Configuração de *rate-limiters* e proxies.
+• Validação de permissões (desactivação de "Enable Withdrawals" por segurança).
+
+Desta forma, o mesmo código pode alternar entre ambientes sem alterações adicionais.
+
+2.5 Estratégias e Orquestração
+Todas as estratégias derivam de `strategies/base_strat.py`, que padroniza:
+
+• Validação de dados de entrada.
+• Cálculo de métricas comuns (retornos, volatilidade, médias móveis, métricas de volume).
+• Interface de geração de sinal (`generate_signal`, `generate_exit_signal`, `get_stop_levels`).
+
+As subclasses implementam lógica própria:
+
+• `BullStrategy` – favorece cruzamentos de médias e momentum positivo.
+• `BearStrategy` – procura tendências descendentes e divergências negativas.
+• `RangingStrategy` – explora reversões em suportes e resistências com RSI suavizado.
+• `VolatileStrategy` – capitaliza em *breakouts* de Bollinger combinados com picos de volume.
+
+O `agents/orchestrator.py` liga tudo: recebe o regime de mercado, filtra os "tokens" aprovados e delega ao executor apenas os sinais produzidos pela estratégia considerada óptima naquele contexto.
+
+**Trecho-chave de activação da estratégia (método `activate_strategy`):**
+```python
+regime_to_strategy = {
+    'Bullish': 'bull',
+    'Bearish': 'bear',
+    'Volatile': 'volatile',
+    'Ranging': 'ranging'
+}
+strategy_key = regime_to_strategy.get(regime)
+self.active_strategy = self.strategies[strategy_key]
+self.active_strategy.set_tokens(approved_tokens)
+```
+Este _mapping_ garante que cada regime detectado seja tratado pela estratégia correspondente, mantendo a coerência entre análise e execução.
+
+2.6 API e Monitorização
+`api/server.py` expõe endpoints REST para operações idempotentes (estatus, desempenho, risco) e um WebSocket que emite eventos de log em tempo-real. O webhook `/botpress` traduz comandos textuais de um chatbot em chamadas internas, permitindo controlo em linguagem natural.
+
+Os logs estruturados em JSON incluem nível, timestamp, identificador de componente e contexto operacional, facilitando integração com ELK ou Grafana Loki.
+
+2.7 Exemplos Práticos de Código
+
+A seguir apresentamos excertos representativos do código-fonte que ilustram os conceitos anteriormente descritos.
+
+• Leitura do `config.yaml` (trecho de `core/exchange_config.py`):
+```python
+with open(config_file, 'r') as file:
+    return yaml.safe_load(file)  # Carrega todo o YAML para um dicionário Python
+```
+Este fragmento demonstra a desserialização segura do ficheiro de configuração, usando `yaml.safe_load` para evitar execução inadvertida de tags YAML maliciosas.
+
+• Cálculo de RSI e classificação de regime (simplificado de `core/market_analyzer.py`):
+```python
+# Dentro de MarketRegimeAnalyzer.detect_regime()
+latest = df.iloc[-1]
+rsi = ta.RSI(df['close'], timeperiod=14)[-1]
+if rsi > 60:
+    regime = 'Bullish'
+elif rsi < 40:
+    regime = 'Bearish'
+else:
+    regime = 'Ranging'
+```
+O código aplica o indicador RSI da biblioteca TA-Lib e, com base em limiares configuráveis, atribui o regime do mercado.
+
+• Envio de ordem OCO (One-Cancels-Other) em `execution/order_executor.py`:
+```python
+def _place_oco(self, symbol, qty, price, stop_loss, take_profit):
+    params = {
+        'stopLossPrice': stop_loss,
+        'price': take_profit,
+        'quantity': qty,
+        'symbol': symbol.replace('/', '')
+    }
+    return self.exchange.create_order(
+        symbol=symbol,
+        type='OCO',
+        side='SELL',
+        amount=qty,
+        price=take_profit,
+        params=params
+    )
+```
+Este método encapsula a lógica de criação de uma ordem OCO na Binance, utilizando o adaptor CCXT e respeitando os parâmetros de risco calculados pela estratégia.
+
+• Activação dinâmica de estratégia no Orchestrator (`agents/orchestrator.py`):
+```python
+regime = self.market_analyzer.detect_regime(global_market_df)
+self.active_strategy = self.strategy_map[regime]
+self.active_strategy.set_tokens(approved_tokens)
+```
+O Orchestrator selecciona a estratégia apropriada com base no regime detectado e injeta a lista de activos aprovados, assegurando coerência entre análise e execução.
+
+• Politica de back-off exponencial para retries (`execution/order_executor.py`):
+```python
+for attempt in range(max_retries):
+    try:
+        order = self.exchange.create_order(**order_params)
+        return order
+    except ccxt.NetworkError as e:
+        time.sleep(self.retry_delay * (2 ** attempt))
+```
+Cada falha de rede provoca um delay que dobra a cada tentativa, mitigando throttling e problemas de latência momentânea.
+
+---
+
+
+3. Exemplo de Configuração e Fluxo de Operação
+
+3.1 Configuração Comentada (`config.yaml`)
+```yaml
+trading:
+  cycle_interval: 300        # Tempo (s) entre ciclos de trading
+  base_currency: "USDT"      # Moeda de referência do portfólio
+  trading_pairs:             # Pares activos
+    - "BTC/USDT"
+    - "ETH/USDT"
+  paper_trading: true        # Desactiva execução real
+
+exchange:
+  name: 'binance'
+  testnet: true              # Utilizar ambiente de testes
+  mainnet_fallback: false    # Impede fallback automático
+```
+Este excerto real demonstra como activar o modo de paper trading em ambiente Binance Testnet, garantindo segurança total durante fases de validação.
+
+3.2 Sequência de Inicialização (`main.py`)
+1. Carrega `config.yaml` ➜ `ExchangeConfig`.
+2. Instancia `MarketAnalysisSystem`, `RiskManager` e `SmartOrderExecutor`.
+3. Inicia o loop assíncrono `asyncio.ensure_future(trading_loop())`.
+4. Lança o servidor FastAPI (`uvicorn.run(app)`).
+
+3.3 Ciclo Assíncrono de Trading (simplificado)
+```python
+while True:
+    analysis = market_analyzer.update()
+    orchestrator.activate_strategy(analysis['global_regime'])
+    orchestrator.monitor_and_execute()
+    await asyncio.sleep(cfg.trading.cycle_interval)
+```
+O sistema avalia o mercado, actualiza a estratégia activa e executa ordens, aguardando o intervalo configurado antes do próximo ciclo.
+
+3.4 Interacção via WebSocket
+Durante a execução, mensagens JSON são emitidas:
+```json
+{"event": "order_filled", "symbol": "BTC/USDT", "qty": 0.01, "price": 67850.0}
+```
+Estas notificações possibilitam dashboards em tempo-real ou integrações com sistemas externos de alerta.
+
+---
+
+4. Integração com Chatbot e FastAPI
+
+A camada de interação humana do DeFAI combina a robustez de uma API REST/WebSocket escrita em FastAPI com a conveniência do Botpress, permitindo comandos em linguagem natural. Isto garante que tanto desenvolvedores quanto operadores sem forte bagagem técnica consigam supervisionar e ajustar o sistema.
+
+4.1 Endpoints REST Cruciais
+• `POST /start` – inicia o loop de trading (exemplo real em `api/server.py`, função `start_system`).
+• `GET  /status` – devolve JSON com regime de mercado, estratégia activa, métricas de risco e performance (linhas 116-138).
+• `POST /botpress` – webhook autenticado (`x-botpress-secret`) para mensagens provenientes do chatbot.
+
+```python
+@app.get("/status")
+async def get_status():
+    return await system_manager.get_system_status()
+```
+
+4.2 WebSocket de Notificações
+Clientes subscrevem `ws://<host>/ws` e recebem eventos estruturados:
+```json
+{"event": "order_filled", "symbol": "BTC/USDT", "qty": 0.01, "price": 67850.0}
+```
+A difusão é implementada em `_broadcast_notification()` usando `await client.send_json(...)`.
+
+4.3 Fluxo de Mensagens Botpress
+O payload típico contém campos `text`, `conversation_id` e `userId`. O servidor interpreta o comando (por exemplo, `/status`) e responde via webhook.
+
+---
+
+5. Considerações Técnicas e Desafios
+
+• **Latência** – Concurrency com `asyncio` reduz o tempo entre geração de sinal e execução; _rate-limits_ da exchange são mitigados por _throttling_ interno.
+• **Segurança** – Chaves API carregadas por variáveis de ambiente ou `config.yaml`; recomenda-se restringir IPs e nunca activar permissões de _withdraw_.
+• **Resiliência** – A política de back-off exponencial (Cap. 2) lida com falhas transitórias; monitorização via Logs + métricas expostas em `/status`.
+• **Testabilidade** – O sistema _mock_ em `TradingSystemManager` possibilita _smoke tests_ sem dependências externas, acelerando CI.
+• **Observabilidade** – Logs em JSON facilitam ingestão por ELK/Grafana Loki; eventos em WebSocket permitem dashboards em tempo-real.
+
+---
+
+6. Roadmap e Próximas Evoluções
+
+1. **Machine Learning Auto-Adaptativo** – Introduzir _reinforcement learning_ para ajuste de parâmetros das estratégias em produção.
+2. **Dashboard Web React** – Interface gráfica em tempo-real consumindo o WebSocket; gráficos de PnL, drawdown e distribuição de trades.
+3. **Suporte Multi-Exchange** – Extensões para Kraken, Coinbase e Bybit, mantendo a abstracção CCXT.
+4. **Motor de Backtesting Unificado** – Permitir validação histórica no mesmo código-base antes do _deploy_.
+5. **Gestão Avançada de Risco** – Implementar _Kelly Criterion_ e _position netting_ para otimização de alocação.
+
+---
+
+
+---
+
+

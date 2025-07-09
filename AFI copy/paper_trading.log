@@ -1,0 +1,34 @@
+2025-07-09 00:02:27,427 - PaperTrading - INFO - Initializing paper trading system...
+2025-07-09 00:02:27,443 - TradingSystem - INFO - Logging system initialized
+2025-07-09 00:02:27,443 - TradingSystem - INFO - Initializing system components...
+2025-07-09 00:02:27,443 - TradingSystem - INFO - Initializing MarketAnalysisSystem...
+2025-07-09 00:02:28,320 - AFI.core.market_analyzer - INFO - Successfully connected to binance testnet
+2025-07-09 00:02:28,321 - TradingSystem - INFO - MarketAnalysisSystem initialized.
+2025-07-09 00:02:28,321 - TradingSystem - INFO - Initializing RiskManager...
+2025-07-09 00:02:28,322 - TradingSystem - INFO - RiskManager initialized.
+2025-07-09 00:02:28,323 - TradingSystem - INFO - Initializing SmartOrderExecutor...
+2025-07-09 00:02:28,323 - TradingSystem - INFO - SmartOrderExecutor initialized.
+2025-07-09 00:02:28,324 - TradingSystem - INFO - Initializing strategies...
+2025-07-09 00:02:28,324 - TradingSystem - INFO - Strategies initialized.
+2025-07-09 00:02:28,324 - TradingSystem - INFO - Initializing StrategyOrchestrator...
+2025-07-09 00:02:28,325 - AFI.agents.orchestrator - INFO - Market analyzer set for BullStrategy
+2025-07-09 00:02:28,325 - AFI.agents.orchestrator - INFO - Market analyzer set for BearStrategy
+2025-07-09 00:02:28,325 - AFI.agents.orchestrator - INFO - Market analyzer set for RangingStrategy
+2025-07-09 00:02:28,325 - AFI.agents.orchestrator - INFO - Market analyzer set for VolatileStrategy
+2025-07-09 00:02:28,325 - TradingSystem - INFO - StrategyOrchestrator initialized.
+2025-07-09 00:02:28,326 - TradingSystem - INFO - System components initialized successfully
+2025-07-09 00:02:28,326 - PaperTrading - INFO - System initialized successfully. Starting paper trading...
+2025-07-09 00:02:28,326 - TradingSystem - INFO - Starting trading system...
+2025-07-09 00:02:29,094 - TradingSystem - WARNING - No active strategy
+2025-07-09 00:02:29,094 - TradingSystem - INFO - System Health - Active Positions: 0, Success Rate: 0.00%
+2025-07-09 00:02:29,094 - AFI.agents.orchestrator - INFO - Starting Strategy Orchestrator...
+2025-07-09 00:02:35,546 - AFI.core.market_analyzer - WARNING - Dataset contains zero volumes
+2025-07-09 00:02:35,546 - AFI.core.market_analyzer - WARNING - Invalid data for PEPE/USDT
+2025-07-09 00:02:35,868 - AFI.agents.orchestrator - INFO - Current Market Regime: Ranging
+2025-07-09 00:02:35,869 - AFI.agents.orchestrator - INFO - Approved Tokens: {'SOL/USDT': 0.7, 'SUI/USDT': 0.7, 'WIF/USDT': 0.7}
+2025-07-09 00:02:35,869 - RangingStrategy - INFO - Received 3 approved tokens
+2025-07-09 00:02:35,869 - AFI.agents.orchestrator - INFO - Activated Strategy: RangingStrategy
+2025-07-09 00:02:36,674 - AFI.core.market_analyzer - WARNING - Dataset contains zero volumes
+2025-07-09 00:02:36,674 - AFI.core.market_analyzer - WARNING - Invalid data for PEPE/USDT
+2025-07-09 00:02:36,674 - AFI.agents.orchestrator - INFO - Active Strategy: RangingStrategy
+2025-07-09 00:02:36,675 - AFI.agents.orchestrator - INFO - Active Tokens: 0
